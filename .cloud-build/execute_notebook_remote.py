@@ -5,10 +5,10 @@ from google.cloud.aiplatform import utils
 from typing import List, Optional, Sequence
 import os
 
-CONTAINER_URI = (
-    "gcr.io/cloud-devrel-public-resources/python-samples-testing-docker:latest"
-)
-
+# CONTAINER_URI = (
+#     "gcr.io/cloud-devrel-public-resources/python-samples-testing-docker:latest"
+# )
+CONTAINER_URI = "us-docker.pkg.dev/vertex-ai/training/scikit-learn-cpu.0-23:latest"
 
 # def _package_and_upload_module(
 #     self,
@@ -52,7 +52,12 @@ def run_notebook_remote(
         script_path=script_path,
         container_uri=container_uri,
         requirements=requirements,
+        environment_variables={"IS_TESTING": 1},
     )
+
+    # job = aiplatform.CustomContainerTrainingJob(
+    #     display_name=notebook_name, container_uri=container_uri
+    # )
 
     job.run(
         args=["--notebook_uri", notebook_uri],

@@ -89,7 +89,7 @@ def execute_notebook(
     time_start = datetime.datetime.now()
     try:
         ExecuteNotebook.execute_notebook(
-            notebook_file_path=notebook,
+            notebook_source=notebook,
             output_file_folder=artifacts_path,
             replacement_map={
                 "PROJECT_ID": variable_project_id,

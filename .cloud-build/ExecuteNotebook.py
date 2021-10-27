@@ -13,78 +13,78 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
 import sys
 import nbformat
 import os
 import errno
-from NotebookProcessors import RemoveNoExecuteCells, UpdateVariablesPreprocessor
-from typing import Dict, Tuple
+from .NotebookProcessors import (
+    RemoveNoExecuteCells,
+    UpdateVariablesPreprocessor,
+)
+from typing import Dict, Optional, Tuple
 import papermill as pm
 import shutil
-import virtualenv
-import uuid
-from jupyter_client.kernelspecapp import KernelSpecManager
+
+from google.cloud.aiplatform import utils
+from google.cloud import storage
+from google.auth import credentials as auth_credentials
 
 # This script is used to execute a notebook and write out the output notebook.
 # The replaces calling the nbconvert via command-line, which doesn't write the output notebook correctly when there are errors during execution.
 
 STAGING_FOLDER = "staging"
-ENVIRONMENTS_PATH = "environments"
-KERNELS_SPECS_PATH = "kernel_specs"
 
 
-def create_and_install_kernel() -> Tuple[str, str]:
-    # Create environment
-    kernel_name = str(uuid.uuid4())
-    env_name = f"{ENVIRONMENTS_PATH}/{kernel_name}"
-    # venv.create(env_name, system_site_packages=True, with_pip=True)
-    virtualenv.cli_run([env_name, "--system-site-packages"])
+def upload_file(
+    local_file_path: str,
+    gcs_dir: str,
+    project: Optional[str] = None,
+    credentials: Optional[auth_credentials.Credentials] = None,
+) -> str:
+    """Copies a local file to a GCS path."""
 
-    # Create kernel spec
-    kernel_spec = {
-        "argv": [
-            f"{env_name}/bin/python",
-            "-m",
-            "ipykernel_launcher",
-            "-f",
-            "{connection_file}",
-        ],
-        "display_name": "Python 3",
-        "language": "python",
-    }
-    kernel_spec_folder = os.path.join(KERNELS_SPECS_PATH, kernel_name)
-    kernel_spec_file = os.path.join(kernel_spec_folder, "kernel.json")
+    # TODO(b/171202993) add user agent
+    gcs_bucket, blob_path = utils.extract_bucket_and_prefix_from_gcs_path(gcs_dir)
+    client = storage.Client(project=project, credentials=credentials)
+    bucket = client.bucket(gcs_bucket)
+    blob = bucket.blob(blob_path)
+    blob.upload_from_filename(local_file_path)
 
-    # Create kernel spec folder
-    if not os.path.exists(os.path.dirname(kernel_spec_file)):
-        try:
-            os.makedirs(os.path.dirname(kernel_spec_file))
-        except OSError as exc:  # Guard against race condition
-            if exc.errno != errno.EEXIST:
-                raise
+    gcs_path = "".join(["gs://", "/".join([blob.bucket.name, blob.name])])
+    return gcs_path
 
-    with open(kernel_spec_file, mode="w", encoding="utf-8") as f:
-        json.dump(kernel_spec, f)
 
-    # Install kernel
-    kernel_spec_manager = KernelSpecManager()
-    kernel_spec_manager.install_kernel_spec(
-        source_dir=kernel_spec_folder, kernel_name=kernel_name
-    )
+def download_file(bucket_name: str, blob_name: str, destination_file: str) -> str:
+    from google.cloud import storage
 
-    return kernel_name, env_name
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(blob_name)
+
+    blob.download_to_filename(filename=destination_file)
 
 
 def execute_notebook(
-    notebook_file_path: str,
+    notebook_source: str,
     output_file_folder: str,
     replacement_map: Dict[str, str],
     should_log_output: bool,
-    should_use_new_kernel: bool,
 ):
+    # Download notebook if it's a GCS URI
+    if notebook_source.startswith("gs://"):
+        # Extract uri components
+        bucket_name, prefix = utils.extract_bucket_and_prefix_from_gcs_path(
+            notebook_source
+        )
+
+        # Download remote notebook to local file system
+        notebook_source = "notebook.ipynb"
+        download_file(
+            bucket_name=bucket_name, blob_name=prefix, destination_file=notebook_source
+        )
+
     # Create staging directory if it doesn't exist
-    staging_file_path = f"{STAGING_FOLDER}/{notebook_file_path}"
+    staging_file_path = f"{STAGING_FOLDER}/{notebook_source}"
     if not os.path.exists(os.path.dirname(staging_file_path)):
         try:
             os.makedirs(os.path.dirname(staging_file_path))
@@ -92,26 +92,10 @@ def execute_notebook(
             if exc.errno != errno.EEXIST:
                 raise
 
-    file_name = os.path.basename(os.path.normpath(notebook_file_path))
-
-    # Create environments folder
-    if not os.path.exists(ENVIRONMENTS_PATH):
-        try:
-            os.makedirs(ENVIRONMENTS_PATH)
-        except OSError as exc:  # Guard against race condition
-            if exc.errno != errno.EEXIST:
-                raise
-
-    # Create and install kernel
-    kernel_name = next(
-        iter(KernelSpecManager().find_kernel_specs().keys()), None
-    )  # Find first existing kernel and use as default
-    env_name = None
-    if should_use_new_kernel:
-        kernel_name, env_name = create_and_install_kernel()
+    file_name = os.path.basename(os.path.normpath(notebook_source))
 
     # Read notebook
-    with open(notebook_file_path) as f:
+    with open(notebook_source) as f:
         nb = nbformat.read(f, as_version=4)
 
     has_error = False
@@ -140,7 +124,6 @@ def execute_notebook(
         pm.execute_notebook(
             input_path=staging_file_path,
             output_path=staging_file_path,
-            kernel_name=kernel_name,
             progress_bar=should_log_output,
             request_save_on_cell_execute=should_log_output,
             log_output=should_log_output,
@@ -154,22 +137,53 @@ def execute_notebook(
         raise
 
     finally:
-        # Clear env
-        if env_name is not None:
-            shutil.rmtree(path=env_name)
+        # # Clear env
+        # if env_name is not None:
+        #     shutil.rmtree(path=env_name)
 
         # Copy execute notebook
         output_file_path = os.path.join(
             output_file_folder, "failure" if has_error else "success", file_name
         )
 
-        # Create directories if they don't exist
-        if not os.path.exists(os.path.dirname(output_file_path)):
-            try:
-                os.makedirs(os.path.dirname(output_file_path))
-            except OSError as exc:  # Guard against race condition
-                if exc.errno != errno.EEXIST:
-                    raise
+        if output_file_path.startswith("gs://"):
+            # Upload to GCS path
+            upload_file(staging_file_path, gcs_dir=output_file_path)
 
-        # print(f"Writing output to: {output_file_path}")
-        shutil.move(staging_file_path, output_file_path)
+            print(f"Uploaded output to: {output_file_path}")
+        else:
+            # Create directories if they don't exist
+            if not os.path.exists(os.path.dirname(output_file_path)):
+                try:
+                    os.makedirs(os.path.dirname(output_file_path))
+                except OSError as exc:  # Guard against race condition
+                    if exc.errno != errno.EEXIST:
+                        raise
+
+            print(f"Writing output to: {output_file_path}")
+            shutil.move(staging_file_path, output_file_path)
+
+
+import argparse
+
+parser = argparse.ArgumentParser(description="Run changed notebooks.")
+parser.add_argument(
+    "--notebook_source",
+    type=str,
+    help="Local filepath or GCS URI to notebook.",
+    required=True,
+)
+parser.add_argument(
+    "--output_folder_or_uri",
+    type=str,
+    help="Local folder or GCS URI to save executed notebook to.",
+    required=True,
+)
+
+args = parser.parse_args()
+execute_notebook(
+    notebook_source=args.notebook_source,
+    output_file_folder=args.output_folder_or_uri,
+    replacement_map={},
+    should_log_output=True,
+)

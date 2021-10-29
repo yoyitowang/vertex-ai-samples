@@ -7,40 +7,92 @@ from utils.NotebookProcessors import (
     UpdateVariablesPreprocessor,
 )
 
-# CONTAINER_URI = (
-#     "gcr.io/cloud-devrel-public-resources/python-samples-testing-docker:latest"
-# )
-CONTAINER_URI = "us-docker.pkg.dev/vertex-ai/training/scikit-learn-cpu.0-23:latest"
+CONTAINER_URI = (
+    "gcr.io/cloud-devrel-public-resources/python-samples-testing-docker:latest"
+)
+# CONTAINER_URI = "us-docker.pkg.dev/vertex-ai/training/scikit-learn-cpu.0-23:latest"
+
+
+import google.auth
+from google.cloud.devtools import cloudbuild_v1
+
+import yaml
 
 
 def run_notebook_remote(
-    package_gcs_uri: str,
-    python_module_name: str,
     container_uri: str,
     notebook_uri: str,
     output_uri: str,
 ):
-    notebook_name = "notebook_execution"
-    job = aiplatform.CustomPythonPackageTrainingJob(
-        display_name=notebook_name,
-        python_package_gcs_uri=package_gcs_uri,
-        python_module_name=python_module_name,
-        container_uri=container_uri,
+    """Create and execute a simple Google Cloud Build configuration,
+    print the in-progress status and print the completed status."""
+
+    # Authorize the client with Google defaults
+    credentials, project_id = google.auth.default()
+    client = cloudbuild_v1.services.cloud_build.CloudBuildClient()
+
+    build = cloudbuild_v1.Build()
+
+    # The following build steps will output "hello world"
+    # For more information on build configuration, see
+    # https://cloud.google.com/build/docs/configuring-builds/create-basic-configuration
+    cloudbuild_config = yaml.load(
+        open(".cloud-build/notebook-execution-test-cloudbuild-single.yaml")
     )
 
-    job.run(
-        args=[
-            "--notebook_source",
-            notebook_uri,
-            "--output_folder_or_uri",
-            output_uri,
-        ],
-        environment_variables={
-            "IS_TESTING": 1,
-        },
-        replica_count=1,
-        sync=True,
-    )
+    # build.steps = [
+    #     {"name": "ubuntu", "entrypoint": "bash", "args": ["-c", "echo hello world"]}
+    # ]
+
+    build.steps = cloudbuild_config["steps"]
+
+    build.substitutions = {
+        "_PYTHON_IMAGE": container_uri,
+        "_NOTEBOOK_GCS_URI": notebook_uri,
+        "_OUTPUT_GCS_URI": output_uri,
+        "_BASE_BRANCH": "master",
+    }
+
+    # build.timeout = "86400s"
+
+    operation = client.create_build(project_id=project_id, build=build)
+    # Print the in-progress operation
+    print("IN PROGRESS:")
+    print(operation.metadata)
+
+    result = operation.result()
+    # Print the completed status
+    print("RESULT:", result.status)
+
+
+# def run_notebook_remote(
+#     package_gcs_uri: str,
+#     python_module_name: str,
+#     container_uri: str,
+#     notebook_uri: str,
+#     output_uri: str,
+# ):
+#     notebook_name = "notebook_execution"
+#     job = aiplatform.CustomPythonPackageTrainingJob(
+#         display_name=notebook_name,
+#         python_package_gcs_uri=package_gcs_uri,
+#         python_module_name=python_module_name,
+#         container_uri=container_uri,
+#     )
+
+#     job.run(
+#         args=[
+#             "--notebook_source",
+#             notebook_uri,
+#             "--output_folder_or_uri",
+#             output_uri,
+#         ],
+#         environment_variables={
+#             "IS_TESTING": 1,
+#         },
+#         replica_count=1,
+#         sync=True,
+#     )
 
 
 def process_notebook(
@@ -91,36 +143,15 @@ process_notebook(
         "REGION": variable_region,
     },
 )
+
+# Copy notebook to GCS
 notebook_uri = utils._timestamped_copy_to_gcs(
     local_file_path=destination_notebook_path, gcs_dir=destination_gcs_folder
 )
 
-aiplatform.init(project=project, staging_bucket=staging_bucket)
-
-# Read requirements.txt
-requirements = []
-with open(".cloud-build/requirements.txt") as file:
-    requirements = file.readlines()
-    requirements = [line.rstrip() for line in requirements]
-
-# Create packager
-python_packager = utils.source_utils._TrainingScriptPythonPackager(
-    script_path=".cloud-build",
-    task_module_name="ExecuteNotebook",
-    requirements=requirements,
-)
-
-# Package and upload to GCS
-package_gcs_uri = python_packager.package_and_copy_to_gcs(
-    gcs_staging_dir=staging_bucket,
-    project=project,
-)
-
-python_module_name = python_packager.module_name
-
 run_notebook_remote(
-    package_gcs_uri=package_gcs_uri,
-    python_module_name=python_module_name,
+    # package_gcs_uri=package_gcs_uri,
+    # python_module_name=python_module_name,
     container_uri=CONTAINER_URI,
     notebook_uri=notebook_uri,
     output_uri=output_uri,

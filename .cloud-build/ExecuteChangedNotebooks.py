@@ -91,12 +91,7 @@ def execute_notebook(
         ExecuteNotebook.execute_notebook(
             notebook_source=notebook,
             output_file_folder=artifacts_path,
-            replacement_map={
-                "PROJECT_ID": variable_project_id,
-                "REGION": variable_region,
-            },
             should_log_output=should_log_output,
-            should_use_new_kernel=should_use_new_kernel,
         )
         result.duration = datetime.datetime.now() - time_start
         result.is_pass = True

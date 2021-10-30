@@ -18,8 +18,11 @@ from google.cloud.devtools import cloudbuild_v1
 
 import yaml
 
+CLOUD_BUILD_FILEPATH = ".cloud-build/notebook-execution-test-cloudbuild-single.yaml"
+
 
 def run_notebook_remote(
+    branch_name: str,
     container_uri: str,
     notebook_uri: str,
     output_uri: str,
@@ -36,22 +39,28 @@ def run_notebook_remote(
     # The following build steps will output "hello world"
     # For more information on build configuration, see
     # https://cloud.google.com/build/docs/configuring-builds/create-basic-configuration
-    cloudbuild_config = yaml.load(
-        open(".cloud-build/notebook-execution-test-cloudbuild-single.yaml")
-    )
+    cloudbuild_config = yaml.load(open(CLOUD_BUILD_FILEPATH))
 
-    # build.steps = [
-    #     {"name": "ubuntu", "entrypoint": "bash", "args": ["-c", "echo hello world"]}
-    # ]
-
-    build.steps = cloudbuild_config["steps"]
-
-    build.substitutions = {
+    substitutions = {
         "_PYTHON_IMAGE": container_uri,
         "_NOTEBOOK_GCS_URI": notebook_uri,
         "_OUTPUT_GCS_URI": output_uri,
         "_BASE_BRANCH": "master",
+        "_GIT_REPO": "https://github.com/GoogleCloudPlatform/vertex-ai-samples.git",
+        "_GIT_BRANCH_NAME": branch_name,
     }
+
+    # repo_source = cloudbuild_v1.types.RepoSource(
+    #     repo_name="git@github.com:GoogleCloudPlatform/vertex-ai-samples.git",
+    #     branch_name=branch_name,
+    #     substitutions=substitutions,
+    # )
+
+    # build.source = cloudbuild_v1.types.Source(repo_source=repo_source)
+
+    build.steps = cloudbuild_config["steps"]
+
+    build.substitutions = substitutions
 
     # build.timeout = "86400s"
 
@@ -152,6 +161,7 @@ notebook_uri = utils._timestamped_copy_to_gcs(
 run_notebook_remote(
     # package_gcs_uri=package_gcs_uri,
     # python_module_name=python_module_name,
+    branch_name="imkc--custom-job-notebook-execution",
     container_uri=CONTAINER_URI,
     notebook_uri=notebook_uri,
     output_uri=output_uri,

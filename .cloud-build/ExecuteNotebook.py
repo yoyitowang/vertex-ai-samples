@@ -128,25 +128,25 @@ def execute_notebook(
             shutil.move(notebook_source, output_file_path)
 
 
-import argparse
+# import argparse
 
-parser = argparse.ArgumentParser(description="Run changed notebooks.")
-parser.add_argument(
-    "--notebook_source",
-    type=str,
-    help="Local filepath or GCS URI to notebook.",
-    required=True,
-)
-parser.add_argument(
-    "--output_folder_or_uri",
-    type=str,
-    help="Local folder or GCS URI to save executed notebook to.",
-    required=True,
-)
+# parser = argparse.ArgumentParser(description="Run changed notebooks.")
+# parser.add_argument(
+#     "--notebook_source",
+#     type=str,
+#     help="Local filepath or GCS URI to notebook.",
+#     required=True,
+# )
+# parser.add_argument(
+#     "--output_folder_or_uri",
+#     type=str,
+#     help="Local folder or GCS URI to save executed notebook to.",
+#     required=True,
+# )
 
-args = parser.parse_args()
-execute_notebook(
-    notebook_source=args.notebook_source,
-    output_file_folder=args.output_folder_or_uri,
-    should_log_output=True,
-)
+# args = parser.parse_args()
+# execute_notebook(
+#     notebook_source=args.notebook_source,
+#     output_file_folder=args.output_folder_or_uri,
+#     should_log_output=True,
+# )

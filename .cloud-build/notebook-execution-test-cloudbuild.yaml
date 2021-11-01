@@ -5,6 +5,10 @@ steps:
     args:
     - -c
     - 'gcloud config list' 
+  # Clone the Git repo
+  - name: ${_PYTHON_IMAGE}
+    entrypoint: git
+    args: ['clone', "${_GIT_REPO}", "--branch", "${_GIT_BRANCH_NAME}", "."]    
   # Check the Python version
   - name: ${_PYTHON_IMAGE}
     entrypoint: /bin/sh

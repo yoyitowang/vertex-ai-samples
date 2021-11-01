@@ -30,7 +30,7 @@ steps:
     entrypoint: /bin/sh
     args:
     - -c
-    - 'python3 -m pip freeze && python3 .cloud-build/ExecuteNotebook.py --notebook_source "${_NOTEBOOK_GCS_URI}" --output_folder_or_uri "${_OUTPUT_GCS_URI}"'
+    - 'python3 -m pip freeze && python3 .cloud-build/execute_notebook_cli.py --notebook_source "${_NOTEBOOK_GCS_URI}" --output_folder_or_uri "${_OUTPUT_GCS_URI}"'
     env:
     - 'IS_TESTING=1'
   # # Manually copy artifacts to GCS

@@ -19,6 +19,7 @@ import datetime
 import functools
 import pathlib
 import os
+import nbformat
 import subprocess
 from pathlib import Path
 from typing import List, Optional
@@ -26,6 +27,7 @@ import concurrent
 from tabulate import tabulate
 
 import ExecuteNotebook
+from utils import NotebookProcessors
 
 
 def str2bool(v):
@@ -77,6 +79,30 @@ def execute_notebook(
     notebook: str,
 ) -> NotebookExecutionResult:
     print(f"Running notebook: {notebook}")
+
+    # Read notebook
+    with open(notebook) as f:
+        nb = nbformat.read(f, as_version=4)
+
+    # Create preprocessors
+    remove_no_execute_cells_preprocessor = NotebookProcessors.RemoveNoExecuteCells()
+    update_variables_preprocessor = NotebookProcessors.UpdateVariablesPreprocessor(
+        replacement_map={
+            "PROJECT_ID": variable_project_id,
+            "REGION": variable_region,
+        },
+    )
+
+    # Use no-execute preprocessor
+    (
+        nb,
+        resources,
+    ) = remove_no_execute_cells_preprocessor.preprocess(nb)
+
+    (nb, resources) = update_variables_preprocessor.preprocess(nb, resources)
+
+    with open(notebook, mode="w", encoding="utf-8") as new_file:
+        nbformat.write(nb, new_file)
 
     result = NotebookExecutionResult(
         notebook=notebook,

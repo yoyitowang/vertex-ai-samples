@@ -8,6 +8,7 @@ from google.cloud.devtools.cloudbuild_v1.types import Source, StorageSource
 import yaml
 
 from google.cloud.aiplatform import utils
+from google.api_core import operation
 
 CLOUD_BUILD_FILEPATH = ".cloud-build/notebook-execution-test-cloudbuild-single.yaml"
 TIMEOUT_IN_SECONDS = 86400
@@ -18,7 +19,7 @@ def execute_notebook_remote(
     notebook_uri: str,
     notebook_output_uri: str,
     container_uri: str,
-):
+) -> operation.Operation:
     """Create and execute a simple Google Cloud Build configuration,
     print the in-progress status and print the completed status."""
 
@@ -58,31 +59,32 @@ def execute_notebook_remote(
 
     operation = client.create_build(project_id=project_id, build=build)
     # Print the in-progress operation
-    print("IN PROGRESS:")
-    print(operation.metadata)
+    # print("IN PROGRESS:")
+    # print(operation.metadata)
 
     result = operation.result()
     # Print the completed status
     print("RESULT:", result.status)
+    return operation
 
 
-# project = "python-docs-samples-tests"
-staging_bucket = "gs://ivanmkc-test2/notebooks"
-# destination_gcs_folder = staging_bucket + "/notebooks"
-output_uri = staging_bucket + "/notebooks/output/output.ipynb"
-code_gcs_uri = staging_bucket + "/code_archives"
+# # project = "python-docs-samples-tests"
+# staging_bucket = "gs://ivanmkc-test2/notebooks"
+# # destination_gcs_folder = staging_bucket + "/notebooks"
+# output_uri = staging_bucket + "/notebooks/output/output.ipynb"
+# code_gcs_uri = staging_bucket + "/code_archives"
 
-local_notebook_path = "notebooks/official/custom/test.ipynb"
+# local_notebook_path = "notebooks/official/custom/test.ipynb"
 
-notebook_uri = "gs://ivanmkc-test2/cloudbuild-test/test.ipynb"
+# notebook_uri = "gs://ivanmkc-test2/cloudbuild-test/test.ipynb"
 
-from utils import util
+# from utils import util
 
-code_archive_uri = util.archive_code_and_upload(staging_bucket=staging_bucket)
+# code_archive_uri = util.archive_code_and_upload(staging_bucket=staging_bucket)
 
-execute_notebook_remote(
-    code_archive_uri=code_archive_uri,
-    notebook_uri=local_notebook_path,
-    notebook_output_uri=output_uri,
-    container_uri="gcr.io/cloud-devrel-public-resources/python-samples-testing-docker:latest",
-)
+# execute_notebook_remote(
+#     code_archive_uri=code_archive_uri,
+#     notebook_uri=local_notebook_path,
+#     notebook_output_uri=output_uri,
+#     container_uri="gcr.io/cloud-devrel-public-resources/python-samples-testing-docker:latest",
+# )

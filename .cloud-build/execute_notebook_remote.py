@@ -66,24 +66,23 @@ def execute_notebook_remote(
     print("RESULT:", result.status)
 
 
-# # project = "python-docs-samples-tests"
-# staging_bucket = "gs://ivanmkc-test2/notebooks"
-# # destination_gcs_folder = staging_bucket + "/notebooks"
-# output_uri = staging_bucket + "/notebooks/output/output.ipynb"
-# code_gcs_uri = staging_bucket + "/code_archives"
+# project = "python-docs-samples-tests"
+staging_bucket = "gs://ivanmkc-test2/notebooks"
+# destination_gcs_folder = staging_bucket + "/notebooks"
+output_uri = staging_bucket + "/notebooks/output/output.ipynb"
+code_gcs_uri = staging_bucket + "/code_archives"
 
-# local_notebook_path = "notebooks/official/custom/test.ipynb"
+local_notebook_path = "notebooks/official/custom/test.ipynb"
 
-# # # Preprocess notebook
-# # destination_notebook_path = "debug.ipynb"
-# # variable_project_id = "python-docs-sample-tests"
-# # variable_region = "us-central1"
+notebook_uri = "gs://ivanmkc-test2/cloudbuild-test/test.ipynb"
 
-# notebook_uri = "gs://ivanmkc-test2/cloudbuild-test/test.ipynb"
+from utils import util
 
-# execute_notebook_remote(
-#     staging_bucket=code_gcs_uri,
-#     notebook_uri=local_notebook_path,
-#     notebook_output_uri=output_uri,
-#     container_uri="gcr.io/cloud-devrel-public-resources/python-samples-testing-docker:latest",
-# )
+code_archive_uri = util.archive_code_and_upload(staging_bucket=staging_bucket)
+
+execute_notebook_remote(
+    code_archive_uri=code_archive_uri,
+    notebook_uri=local_notebook_path,
+    notebook_output_uri=output_uri,
+    container_uri="gcr.io/cloud-devrel-public-resources/python-samples-testing-docker:latest",
+)

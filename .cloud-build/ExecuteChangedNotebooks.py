@@ -72,31 +72,6 @@ class NotebookExecutionResult:
     error_message: Optional[str]
 
 
-def archive_code_and_upload(staging_bucket: str):
-    # Archive all source in current directory
-    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-    source_archived_file = f"source_archived_{timestamp}.tar.gz"
-
-    git_files = subprocess.check_output(
-        ["git", "ls-tree", "-r", "HEAD", "--name-only"], encoding="UTF-8"
-    ).split("\n")
-
-    with tarfile.open(source_archived_file, "w:gz") as tar:
-        for file in git_files:
-            if len(file) > 0:
-                tar.add(file)
-
-    # Upload archive to GCS bucket
-    source_archived_file_gcs = util.upload_file(
-        local_file_path=f"{source_archived_file}",
-        gcs_uri="/".join([staging_bucket, "code_archives", source_archived_file]),
-    )
-
-    print(f"Uploaded source code archive to {source_archived_file_gcs}")
-
-    return source_archived_file_gcs
-
-
 def execute_notebook(
     notebook: str,
     staging_bucket: str,
@@ -151,7 +126,7 @@ def execute_notebook(
     notebook_output_uri = "/".join([artifacts_uri, pathlib.Path(notebook).name])
 
     try:
-        code_archive_uri = archive_code_and_upload(staging_bucket=staging_bucket)
+        code_archive_uri = util.archive_code_and_upload(staging_bucket=staging_bucket)
 
         execute_notebook_remote(
             code_archive_uri=code_archive_uri,

@@ -1,31 +1,23 @@
-from google.cloud import aiplatform
-
-from google.cloud.aiplatform import utils
-
-from utils.NotebookProcessors import (
-    RemoveNoExecuteCells,
-    UpdateVariablesPreprocessor,
-)
-
-CONTAINER_URI = (
-    "gcr.io/cloud-devrel-public-resources/python-samples-testing-docker:latest"
-)
-# CONTAINER_URI = "us-docker.pkg.dev/vertex-ai/training/scikit-learn-cpu.0-23:latest"
-
+from google.protobuf import duration_pb2
+from yaml.loader import FullLoader
 
 import google.auth
 from google.cloud.devtools import cloudbuild_v1
+from google.cloud.devtools.cloudbuild_v1.types import Source, StorageSource
 
 import yaml
 
+from google.cloud.aiplatform import utils
+
 CLOUD_BUILD_FILEPATH = ".cloud-build/notebook-execution-test-cloudbuild-single.yaml"
+TIMEOUT_IN_SECONDS = 86400
 
 
-def run_notebook_remote(
-    branch_name: str,
-    container_uri: str,
+def execute_notebook_remote(
+    code_archive_uri: str,
     notebook_uri: str,
-    output_uri: str,
+    notebook_output_uri: str,
+    container_uri: str,
 ):
     """Create and execute a simple Google Cloud Build configuration,
     print the in-progress status and print the completed status."""
@@ -39,30 +31,30 @@ def run_notebook_remote(
     # The following build steps will output "hello world"
     # For more information on build configuration, see
     # https://cloud.google.com/build/docs/configuring-builds/create-basic-configuration
-    cloudbuild_config = yaml.load(open(CLOUD_BUILD_FILEPATH))
+    cloudbuild_config = yaml.load(open(CLOUD_BUILD_FILEPATH), Loader=FullLoader)
 
     substitutions = {
         "_PYTHON_IMAGE": container_uri,
         "_NOTEBOOK_GCS_URI": notebook_uri,
-        "_OUTPUT_GCS_URI": output_uri,
-        "_BASE_BRANCH": "master",
-        "_GIT_REPO": "https://github.com/GoogleCloudPlatform/vertex-ai-samples.git",
-        "_GIT_BRANCH_NAME": branch_name,
+        "_NOTEBOOK_OUTPUT_GCS_URI": notebook_output_uri,
     }
 
-    # repo_source = cloudbuild_v1.types.RepoSource(
-    #     repo_name="git@github.com:GoogleCloudPlatform/vertex-ai-samples.git",
-    #     branch_name=branch_name,
-    #     substitutions=substitutions,
-    # )
+    (
+        source_archived_file_gcs_bucket,
+        source_archived_file_gcs_object,
+    ) = utils.extract_bucket_and_prefix_from_gcs_path(code_archive_uri)
 
-    # build.source = cloudbuild_v1.types.Source(repo_source=repo_source)
-
+    build.source = Source(
+        storage_source=StorageSource(
+            bucket=source_archived_file_gcs_bucket,
+            object_=source_archived_file_gcs_object,
+        )
+    )
     build.steps = cloudbuild_config["steps"]
 
     build.substitutions = substitutions
 
-    # build.timeout = "86400s"
+    build.timeout = duration_pb2.Duration(seconds=TIMEOUT_IN_SECONDS)
 
     operation = client.create_build(project_id=project_id, build=build)
     # Print the in-progress operation
@@ -74,95 +66,24 @@ def run_notebook_remote(
     print("RESULT:", result.status)
 
 
-# def run_notebook_remote(
-#     package_gcs_uri: str,
-#     python_module_name: str,
-#     container_uri: str,
-#     notebook_uri: str,
-#     output_uri: str,
-# ):
-#     notebook_name = "notebook_execution"
-#     job = aiplatform.CustomPythonPackageTrainingJob(
-#         display_name=notebook_name,
-#         python_package_gcs_uri=package_gcs_uri,
-#         python_module_name=python_module_name,
-#         container_uri=container_uri,
-#     )
+# # project = "python-docs-samples-tests"
+# staging_bucket = "gs://ivanmkc-test2/notebooks"
+# # destination_gcs_folder = staging_bucket + "/notebooks"
+# output_uri = staging_bucket + "/notebooks/output/output.ipynb"
+# code_gcs_uri = staging_bucket + "/code_archives"
 
-#     job.run(
-#         args=[
-#             "--notebook_source",
-#             notebook_uri,
-#             "--output_folder_or_uri",
-#             output_uri,
-#         ],
-#         environment_variables={
-#             "IS_TESTING": 1,
-#         },
-#         replica_count=1,
-#         sync=True,
-#     )
+# local_notebook_path = "notebooks/official/custom/test.ipynb"
 
+# # # Preprocess notebook
+# # destination_notebook_path = "debug.ipynb"
+# # variable_project_id = "python-docs-sample-tests"
+# # variable_region = "us-central1"
 
-def process_notebook(
-    notebook_path: str, destination_notebook_path: str, replacement_map: dict = {}
-):
-    import nbformat
+# notebook_uri = "gs://ivanmkc-test2/cloudbuild-test/test.ipynb"
 
-    remove_no_execute_cells_preprocessor = RemoveNoExecuteCells()
-    update_variables_preprocessor = UpdateVariablesPreprocessor(
-        replacement_map=replacement_map
-    )
-
-    # Read notebook
-    with open(notebook_path) as f:
-        nb = nbformat.read(f, as_version=4)
-
-    # Use no-execute preprocessor
-    (
-        nb,
-        resources,
-    ) = remove_no_execute_cells_preprocessor.preprocess(nb)
-
-    (nb, resources) = update_variables_preprocessor.preprocess(nb, resources)
-
-    # print(f"Staging modified notebook to: {staging_file_path}")
-    with open(destination_notebook_path, mode="w", encoding="utf-8") as f:
-        nbformat.write(nb, f)
-
-
-project = "python-docs-samples-tests"
-staging_bucket = "gs://ivanmkc-test2/notebooks"
-destination_gcs_folder = staging_bucket + "/notebooks"
-output_uri = staging_bucket + "/notebooks/output"
-
-notebook_path = "notebooks/official/custom/custom-tabular-bq-managed-dataset.ipynb"
-
-# Preprocess notebook
-destination_notebook_path = "debug.ipynb"
-variable_project_id = "python-docs-sample-tests"
-variable_region = "us-central1"
-
-# Upload notebook
-process_notebook(
-    notebook_path=notebook_path,
-    destination_notebook_path=destination_notebook_path,
-    replacement_map={
-        "PROJECT_ID": variable_project_id,
-        "REGION": variable_region,
-    },
-)
-
-# Copy notebook to GCS
-notebook_uri = utils._timestamped_copy_to_gcs(
-    local_file_path=destination_notebook_path, gcs_dir=destination_gcs_folder
-)
-
-run_notebook_remote(
-    # package_gcs_uri=package_gcs_uri,
-    # python_module_name=python_module_name,
-    branch_name="imkc--custom-job-notebook-execution",
-    container_uri=CONTAINER_URI,
-    notebook_uri=notebook_uri,
-    output_uri=output_uri,
-)
+# execute_notebook_remote(
+#     staging_bucket=code_gcs_uri,
+#     notebook_uri=local_notebook_path,
+#     notebook_output_uri=output_uri,
+#     container_uri="gcr.io/cloud-devrel-public-resources/python-samples-testing-docker:latest",
+# )

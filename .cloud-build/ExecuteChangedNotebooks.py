@@ -23,10 +23,11 @@ import nbformat
 import subprocess
 from pathlib import Path
 from typing import List, Optional
-import concurrent
 from tabulate import tabulate
+import tarfile
+from utils import util
 
-import ExecuteNotebook
+import execute_notebook_remote
 from utils import NotebookProcessors
 
 
@@ -65,18 +66,42 @@ def format_timedelta(delta: datetime.timedelta) -> str:
 @dataclasses.dataclass
 class NotebookExecutionResult:
     notebook: str
+    output_uri: str
     duration: datetime.timedelta
     is_pass: bool
     error_message: Optional[str]
 
 
+def archive_code_and_upload(staging_bucket: str):
+    # Archive all source in current directory
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    source_archived_file = f"source_archived_{timestamp}.tar.gz"
+
+    git_files = subprocess.check_output(
+        ["git", "ls-tree", "-r", "HEAD", "--name-only"], encoding="UTF-8"
+    ).split("\n")
+
+    with tarfile.open(source_archived_file, "w:gz") as tar:
+        for file in git_files:
+            if len(file) > 0:
+                tar.add(file)
+
+    # Upload archive to GCS bucket
+    source_archived_file_gcs = util.upload_file(
+        local_file_path=f"{source_archived_file}",
+        gcs_uri="/".join([staging_bucket, "code_archives", source_archived_file]),
+    )
+
+    print(f"Uploaded source code archive to {source_archived_file_gcs}")
+
+    return source_archived_file_gcs
+
+
 def execute_notebook(
-    artifacts_path: str,
+    notebook: str,
+    staging_bucket: str,
     variable_project_id: str,
     variable_region: str,
-    should_log_output: bool,
-    should_use_new_kernel: bool,
-    notebook: str,
 ) -> NotebookExecutionResult:
     print(f"Running notebook: {notebook}")
 
@@ -106,6 +131,7 @@ def execute_notebook(
 
     result = NotebookExecutionResult(
         notebook=notebook,
+        output_uri="",
         duration=datetime.timedelta(seconds=0),
         is_pass=False,
         error_message=None,
@@ -113,16 +139,32 @@ def execute_notebook(
 
     # TODO: Handle cases where multiple notebooks have the same name
     time_start = datetime.datetime.now()
+
+    # Create paths
+    artifacts_uri = "/".join(
+        [
+            staging_bucket,
+            "executed_notebooks",
+        ]
+    )
+
+    notebook_output_uri = "/".join([artifacts_uri, pathlib.Path(notebook).name])
+
     try:
-        ExecuteNotebook.execute_notebook(
-            notebook_source=notebook,
-            output_file_folder=artifacts_path,
-            should_log_output=should_log_output,
+        code_archive_uri = archive_code_and_upload(staging_bucket=staging_bucket)
+
+        execute_notebook_remote(
+            code_archive_uri=code_archive_uri,
+            notebook_uri=notebook,
+            notebook_output_uri=notebook_output_uri,
+            container_uri="gcr.io/cloud-devrel-public-resources/python-samples-testing-docker:latest",
         )
+
         result.duration = datetime.datetime.now() - time_start
         result.is_pass = True
         print(f"{notebook} PASSED in {format_timedelta(result.duration)}.")
     except Exception as error:
+        result.output_uri = notebook_output_uri
         result.duration = datetime.datetime.now() - time_start
         result.is_pass = False
         result.error_message = str(error)
@@ -136,11 +178,9 @@ def execute_notebook(
 def run_changed_notebooks(
     test_paths_file: str,
     base_branch: Optional[str],
-    output_folder: str,
+    staging_bucket: str,
     variable_project_id: str,
     variable_region: str,
-    should_parallelize: bool,
-    should_use_separate_kernels: bool,
 ):
     """
     Run the notebooks that exist under the folders defined in the test_paths_file.
@@ -157,19 +197,12 @@ def run_changed_notebooks(
         base_branch (str):
             Optional. If provided, only the files that have changed from the base_branch will be checked.
             If not provided, all files will be checked.
-        output_folder (str):
-            Required. The folder to write executed notebooks to.
+        staging_bucket (str):
+            Required. The GCS staging bucket to write source code and output to.
         variable_project_id (str):
             Required. The value for PROJECT_ID to inject into notebooks.
         variable_region (str):
             Required. The value for REGION to inject into notebooks.
-        should_parallelize (bool):
-            Required. Should run notebooks in parallel using a thread pool as opposed to in sequence.
-        should_use_separate_kernels (bool):
-            Note: Dependencies don't install correctly when this is set to True
-            See https://github.com/nteract/papermill/issues/625
-
-            Required. Should run each notebook in a separate and independent virtual environment.
     """
 
     test_paths = []
@@ -199,47 +232,38 @@ def run_changed_notebooks(
     notebooks = [notebook for notebook in notebooks if len(notebook) > 0]
     notebooks = [notebook for notebook in notebooks if Path(notebook).exists()]
 
-    # Create paths
-    artifacts_path = Path(output_folder)
-    artifacts_path.mkdir(parents=True, exist_ok=True)
-    artifacts_path.joinpath("success").mkdir(parents=True, exist_ok=True)
-    artifacts_path.joinpath("failure").mkdir(parents=True, exist_ok=True)
-
     notebook_execution_results: List[NotebookExecutionResult] = []
 
     if len(notebooks) > 0:
         print(f"Found {len(notebooks)} modified notebooks: {notebooks}")
 
-        if should_parallelize and len(notebooks) > 1:
-            print(
-                "Running notebooks in parallel, so no logs will be displayed. Please wait..."
+        # if should_parallelize and len(notebooks) > 1:
+        #     print(
+        #         "Running notebooks in parallel, so no logs will be displayed. Please wait..."
+        #     )
+        #     with concurrent.futures.ThreadPoolExecutor(max_workers=None) as executor:
+        #         notebook_execution_results = list(
+        #             executor.map(
+        #                 functools.partial(
+        #                     execute_notebook,
+        #                     staging_bucket,
+        #                     variable_project_id,
+        #                     variable_region,
+        #                     False,
+        #                 ),
+        #                 notebooks,
+        #             )
+        #         )
+        # else:
+        notebook_execution_results = [
+            execute_notebook(
+                notebook=notebook,
+                staging_bucket=staging_bucket,
+                variable_project_id=variable_project_id,
+                variable_region=variable_region,
             )
-            with concurrent.futures.ThreadPoolExecutor(max_workers=None) as executor:
-                notebook_execution_results = list(
-                    executor.map(
-                        functools.partial(
-                            execute_notebook,
-                            artifacts_path,
-                            variable_project_id,
-                            variable_region,
-                            False,
-                            should_use_separate_kernels,
-                        ),
-                        notebooks,
-                    )
-                )
-        else:
-            notebook_execution_results = [
-                execute_notebook(
-                    artifacts_path=artifacts_path,
-                    variable_project_id=variable_project_id,
-                    variable_region=variable_region,
-                    notebook=notebook,
-                    should_log_output=True,
-                    should_use_new_kernel=should_use_separate_kernels,
-                )
-                for notebook in notebooks
-            ]
+            for notebook in notebooks
+        ]
     else:
         print("No notebooks modified in this pull request.")
 
@@ -259,10 +283,11 @@ def run_changed_notebooks(
                     "PASSED" if result.is_pass else "FAILED",
                     format_timedelta(result.duration),
                     result.error_message or "--",
+                    result.output_uri,
                 ]
                 for result in notebooks_sorted
             ],
-            headers=["file", "status", "duration", "error"],
+            headers=["file", "status", "duration", "error", "output_uri"],
         )
     )
 
@@ -300,34 +325,18 @@ parser.add_argument(
     required=True,
 )
 
-# Note: Dependencies don't install correctly when this is set to True
 parser.add_argument(
-    "--should_parallelize",
-    type=str2bool,
-    nargs="?",
-    const=True,
-    default=False,
-    help="Should run notebooks in parallel.",
-)
-
-# Note: This isn't guaranteed to work correctly due to existing Papermill issue
-# See https://github.com/nteract/papermill/issues/625
-parser.add_argument(
-    "--should_use_separate_kernels",
-    type=str2bool,
-    nargs="?",
-    const=True,
-    default=False,
-    help="(Experimental) Should run each notebook in a separate and independent virtual environment.",
+    "--staging_bucket",
+    type=str,
+    help="The GCP directory for staging temporary files.",
+    required=True,
 )
 
 args = parser.parse_args()
 run_changed_notebooks(
     test_paths_file=args.test_paths_file,
     base_branch=args.base_branch,
-    output_folder=args.output_folder,
+    staging_bucket=args.staging_bucket,
     variable_project_id=args.variable_project_id,
     variable_region=args.variable_region,
-    should_parallelize=args.should_parallelize,
-    should_use_separate_kernels=args.should_use_separate_kernels,
 )

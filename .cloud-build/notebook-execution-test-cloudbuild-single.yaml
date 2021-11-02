@@ -5,22 +5,12 @@ steps:
     args:
     - -c
     - 'gcloud config list'
-  # Clone the Git repo
-  - name: ${_PYTHON_IMAGE}
-    entrypoint: git
-    args: ['clone', "${_GIT_REPO}", "--branch", "${_GIT_BRANCH_NAME}", "."]
   # Check the Python version
   - name: ${_PYTHON_IMAGE}
     entrypoint: /bin/sh
     args:
     - -c
     - 'python3 .cloud-build/CheckPythonVersion.py'
-  # Fetch base branch if required
-  - name: ${_PYTHON_IMAGE}
-    entrypoint: /bin/sh
-    args:
-    - -c
-    - 'if [ -n "${_BASE_BRANCH}" ]; then git fetch origin "${_BASE_BRANCH}":refs/remotes/origin/"${_BASE_BRANCH}"; else echo "Skipping fetch."; fi'
   # Install Python dependencies
   - name: ${_PYTHON_IMAGE}
     entrypoint: pip
@@ -30,7 +20,7 @@ steps:
     entrypoint: /bin/sh
     args:
     - -c
-    - 'python3 -m pip freeze && python3 .cloud-build/execute_notebook_cli.py --notebook_source "${_NOTEBOOK_GCS_URI}" --output_folder_or_uri "${_OUTPUT_GCS_URI}"'
+    - 'python3 -m pip freeze && python3 .cloud-build/execute_notebook_cli.py --notebook_source "${_NOTEBOOK_GCS_URI}" --output_file_or_uri "${_NOTEBOOK_OUTPUT_GCS_URI}"'
     env:
     - 'IS_TESTING=1'
   # # Manually copy artifacts to GCS

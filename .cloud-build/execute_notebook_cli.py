@@ -24,15 +24,15 @@ parser.add_argument(
     required=True,
 )
 parser.add_argument(
-    "--output_folder_or_uri",
+    "--output_file_or_uri",
     type=str,
-    help="Local folder or GCS URI to save executed notebook to.",
+    help="Local file or GCS URI to save executed notebook to.",
     required=True,
 )
 
 args = parser.parse_args()
 ExecuteNotebook.execute_notebook(
     notebook_source=args.notebook_source,
-    output_file_folder=args.output_folder_or_uri,
+    output_file_or_uri=args.output_file_or_uri,
     should_log_output=True,
 )

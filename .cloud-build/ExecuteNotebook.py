@@ -14,40 +14,16 @@
 # limitations under the License.
 
 import sys
-import nbformat
 import os
 import errno
-from typing import Dict, Optional, Tuple
 import papermill as pm
 import shutil
 
+from utils import util
 from google.cloud.aiplatform import utils
-from google.cloud import storage
-from google.auth import credentials as auth_credentials
 
 # This script is used to execute a notebook and write out the output notebook.
 # The replaces calling the nbconvert via command-line, which doesn't write the output notebook correctly when there are errors during execution.
-
-STAGING_FOLDER = "staging"
-
-
-def upload_file(
-    local_file_path: str,
-    gcs_dir: str,
-    project: Optional[str] = None,
-    credentials: Optional[auth_credentials.Credentials] = None,
-) -> str:
-    """Copies a local file to a GCS path."""
-
-    # TODO(b/171202993) add user agent
-    gcs_bucket, blob_path = utils.extract_bucket_and_prefix_from_gcs_path(gcs_dir)
-    client = storage.Client(project=project, credentials=credentials)
-    bucket = client.bucket(gcs_bucket)
-    blob = bucket.blob(blob_path)
-    blob.upload_from_filename(local_file_path)
-
-    gcs_path = "".join(["gs://", "/".join([blob.bucket.name, blob.name])])
-    return gcs_path
 
 
 def download_file(bucket_name: str, blob_name: str, destination_file: str) -> str:
@@ -62,7 +38,7 @@ def download_file(bucket_name: str, blob_name: str, destination_file: str) -> st
 
 def execute_notebook(
     notebook_source: str,
-    output_file_folder: str,
+    output_file_or_uri: str,
     should_log_output: bool,
 ):
     file_name = os.path.basename(os.path.normpath(notebook_source))
@@ -106,26 +82,22 @@ def execute_notebook(
         #     shutil.rmtree(path=env_name)
 
         # Copy executed notebook
-        output_file_path = os.path.join(
-            output_file_folder, "failure" if has_error else "success", file_name
-        )
-
-        if output_file_path.startswith("gs://"):
+        if output_file_or_uri.startswith("gs://"):
             # Upload to GCS path
-            upload_file(notebook_source, gcs_dir=output_file_path)
+            util.upload_file(notebook_source, remote_file_path=output_file_or_uri)
 
-            print(f"Uploaded output to: {output_file_path}")
+            print(f"Uploaded output to: {output_file_or_uri}")
         else:
             # Create directories if they don't exist
-            if not os.path.exists(os.path.dirname(output_file_path)):
+            if not os.path.exists(os.path.dirname(output_file_or_uri)):
                 try:
-                    os.makedirs(os.path.dirname(output_file_path))
+                    os.makedirs(os.path.dirname(output_file_or_uri))
                 except OSError as exc:  # Guard against race condition
                     if exc.errno != errno.EEXIST:
                         raise
 
-            print(f"Writing output to: {output_file_path}")
-            shutil.move(notebook_source, output_file_path)
+            print(f"Writing output to: {output_file_or_uri}")
+            shutil.move(notebook_source, output_file_or_uri)
 
 
 # import argparse
@@ -147,6 +119,6 @@ def execute_notebook(
 # args = parser.parse_args()
 # execute_notebook(
 #     notebook_source=args.notebook_source,
-#     output_file_folder=args.output_folder_or_uri,
+#     output_file_or_uri=args.output_folder_or_uri,
 #     should_log_output=True,
 # )
